@@ -1,0 +1,8 @@
+[package]
+name = "fileman"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbscan = "0.3.1"
+sqlite = "0.36.1"

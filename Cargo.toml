@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 dbscan = "0.3.1"
-sqlite = "0.36.1"
+clap = { version = "4.5.23", features = ["derive"] }
+macos-tags = "0.2.3"

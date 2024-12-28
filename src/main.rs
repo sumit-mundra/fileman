@@ -1,22 +1,69 @@
+use clap::Parser;
 use dbscan::{Classification, Model};
+use fs::remove_dir_all;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 use std::{fs, io};
 
+/// fileman is a simple tool to group files based on create_date os timestamp using dbscan algorithm.
+/// author: Sumit Mundra
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// the directory to scan
+    #[arg(short, long)]
+    input_path: PathBuf,
+    /// output directory with links to input files grouped inside cluster-wise folders
+    #[arg(short = 'o', long)]
+    target_path: PathBuf,
+    /// duration in seconds between two files to cluster them together
+    #[arg(short, long, default_value_t = 600.0)]
+    time_interval_sec: f64,
+    /// minimum count of files needed to define a cluster
+    #[arg(short='c', long, default_value_t = 3)]
+    min_cluster_size: usize,
+    /// prefix to be used as tag, no tagging if empty
+    #[arg(short='p', long, default_value = "cluster")]
+    tag_prefix: String,
+}
 fn main() {
+    let args = Args::parse();
     let start = Instant::now();
-    println!("{:?}", start);
-    let input_path = "/Users/sumitmundra/Desktop/oldDSLRNikonShots";
-    let entries = list_paths(&input_path);
-    let clusters = build_clusters(entries.clone());
-    println!("{:?}", clusters);
-    println!("{:?}", start.elapsed());
+    let entries = list_paths(&args.input_path);
+    let clusters = build_clusters(entries.clone(), args.time_interval_sec, args.min_cluster_size);
+    create_symlinks(&clusters, &args.target_path);
+    prune_old_tags(entries);
+    if !String::is_empty(&args.tag_prefix) {
+        create_macos_tags(&clusters, &args.tag_prefix);
+    }
+    println!("Finished in {:?} ms", start.elapsed().as_millis());
 }
 
-fn build_clusters<'a>(entries: Vec<PathBuf>) -> HashMap<usize, Vec<String>> {
+fn prune_old_tags(entries: Vec<PathBuf>) {
+    for entry in entries {
+        match macos_tags::prune_tags(&entry) {
+            Ok(_) => {}
+            Err(_tag_error) => {
+                // println!("{:?}", _tag_error);
+            }
+        }
+    }
+}
+
+fn create_macos_tags(clusters: &HashMap<usize, Vec<String>>, prefix: &str) {
+    for (cluster_id, list) in clusters {
+        for item in list {
+            let path = Path::new(item);
+            let t = macos_tags::Tag::Custom(format!("{prefix}_{cluster_id}"));
+            macos_tags::add_tag(path, &t).expect("Could not create tag");
+        }
+    }
+}
+
+fn build_clusters<'a>(entries: Vec<PathBuf>, time_interval_sec: f64, cluster_size: usize) -> HashMap<usize, Vec<String>> {
     let file_db = build_model_input(&entries.clone());
-    let model = Model::new(3600.0, 3);
+    let model = Model::new(time_interval_sec, cluster_size);
     let output = model.run(&file_db);
     let mut clusters: HashMap<usize, Vec<String>> = HashMap::new();
     for (entry, classification) in entries.iter().zip(output.iter()) {
@@ -36,6 +83,29 @@ fn build_clusters<'a>(entries: Vec<PathBuf>) -> HashMap<usize, Vec<String>> {
     clusters
 }
 
+fn create_symlinks(clusters: &HashMap<usize, Vec<String>>, path_buf: &PathBuf) {
+    let result = fs::exists(&path_buf).expect("Failed to check for target path existing or not");
+    let path = path_buf.as_path().to_str().expect("Could not convert path buffer to path");
+    if result {
+        remove_dir_all(path).expect("Could not delete directory recursively");
+    }
+    fs::create_dir(path).expect("Could not create directory");
+    // create a directory for each cluster and create symlink within
+    for (cluster_id, list) in clusters {
+        let mut pb = PathBuf::from(&path);
+        pb.push(cluster_id.to_string());
+        fs::create_dir(pb.as_path()).expect("Could not create directory");
+        for item in list {
+            // println!("{:?}", item);
+            let file_name = Path::new(&item).file_name().unwrap().to_str().unwrap();
+            let mut link_path = pb.clone();
+            link_path.push(file_name);
+            std::os::unix::fs::symlink(item, link_path).expect("Failed to create symlink");
+            // std::os::windows::fs::symlink_file(item, link_path).expect("Failed to create symlink");
+        }
+    }
+}
+
 fn build_model_input(entries: &Vec<PathBuf>) -> Vec<Vec<f64>> {
     let mut file_db: Vec<Vec<f64>> = Vec::new();
     for entry in entries {
@@ -52,9 +122,9 @@ fn build_model_input(entries: &Vec<PathBuf>) -> Vec<Vec<f64>> {
     file_db
 }
 
-fn list_paths(input_path: &&str) -> Vec<PathBuf> {
-    let mut entries = fs::read_dir(&input_path).unwrap()
-        .map(|res| res.map(|e| e.path()))
+fn list_paths(input_path: &PathBuf) -> Vec<PathBuf> {
+    let entries = fs::read_dir(&input_path).unwrap()
+        .map(|res| res.map(|e| fs::canonicalize(e.path()).unwrap()))
         .collect::<Result<Vec<PathBuf>, io::Error>>().unwrap();
     entries
 }

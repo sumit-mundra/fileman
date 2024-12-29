@@ -23,7 +23,7 @@ struct Args {
     /// minimum count of files needed to define a cluster
     #[arg(short = 'c', long, default_value_t = 3)]
     min_cluster_size: usize,
-    /// prefix to be used as tag, no tagging if empty
+    /// prefix to be used as tag and as output directory prefix, no tagging if empty
     #[arg(short = 'p', long, default_value = "cluster")]
     tag_prefix: String,
 }
@@ -32,7 +32,7 @@ fn main() {
     let start = Instant::now();
     let entries = list_paths(&args.input_path);
     let clusters = build_clusters(entries.clone(), args.time_interval_sec, args.min_cluster_size);
-    create_symlinks(&clusters, &args.target_path);
+    create_symlinks(&clusters, &args.target_path, &args.tag_prefix);
     prune_old_tags(entries);
     if !String::is_empty(&args.tag_prefix) {
         create_macos_tags(&clusters, &args.tag_prefix);
@@ -78,20 +78,19 @@ fn build_clusters<'a>(entries: Vec<PathBuf>, time_interval_sec: f64, cluster_siz
     clusters
 }
 
-fn create_symlinks(clusters: &HashMap<usize, Vec<String>>, path_buf: &PathBuf) {
-    let result = fs::exists(&path_buf).expect("Failed to check for target path existing or not");
-    let path = path_buf.as_path().to_str().expect("Could not convert path buffer to path");
-    if result {
+fn create_symlinks(clusters: &HashMap<usize, Vec<String>>, out_path_buf: &PathBuf, prefix: &str) {
+    let output_path = fs::exists(&out_path_buf).expect("Failed to check for output path existing or not");
+    let path = out_path_buf.as_path().to_str().expect("Could not convert output path buffer to path");
+    if output_path {
         remove_dir_all(path).expect("Could not delete directory recursively");
     }
     fs::create_dir(path).expect("Could not create directory");
     // create a directory for each cluster and create symlink within
     for (cluster_id, list) in clusters {
         let mut pb = PathBuf::from(&path);
-        pb.push(cluster_id.to_string());
-        fs::create_dir(pb.as_path()).expect("Could not create directory");
+        pb.push(format!("{prefix}_{cluster_id}"));
+        fs::create_dir_all(pb.as_path()).expect("Could not create directory");
         for item in list {
-            // println!("{:?}", item);
             let file_name = Path::new(&item).file_name().unwrap().to_str().unwrap();
             let mut link_path = pb.clone();
             link_path.push(file_name);

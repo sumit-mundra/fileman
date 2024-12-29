@@ -21,10 +21,10 @@ struct Args {
     #[arg(short, long, default_value_t = 600.0)]
     time_interval_sec: f64,
     /// minimum count of files needed to define a cluster
-    #[arg(short='c', long, default_value_t = 3)]
+    #[arg(short = 'c', long, default_value_t = 3)]
     min_cluster_size: usize,
     /// prefix to be used as tag, no tagging if empty
-    #[arg(short='p', long, default_value = "cluster")]
+    #[arg(short = 'p', long, default_value = "cluster")]
     tag_prefix: String,
 }
 fn main() {
@@ -42,12 +42,7 @@ fn main() {
 
 fn prune_old_tags(entries: Vec<PathBuf>) {
     for entry in entries {
-        match macos_tags::prune_tags(&entry) {
-            Ok(_) => {}
-            Err(_tag_error) => {
-                // println!("{:?}", _tag_error);
-            }
-        }
+        macos_tags::prune_tags(&entry).ok();
     }
 }
 
